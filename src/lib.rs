@@ -2,7 +2,6 @@
 extern crate arrayref;
 
 mod error;
-mod operations;
 pub mod state;
 
 pub mod contract;
@@ -10,6 +9,6 @@ pub mod msg;
 #[cfg(test)]
 mod tests;
 
-pub use crate::{error::*, operations::*, state::*};
+pub use crate::{error::*, state::*};
 use serde::{Deserialize, Serialize};
 pub type Bytes = Vec<u8>;

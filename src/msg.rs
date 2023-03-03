@@ -19,6 +19,9 @@ pub struct Instantiate {
     pub frozen_balances: Vec<Cw20Coin>,
     /// minting data
     pub mint: Option<MinterResponse>,
+    /// balance cap for each token holder (eg. balance cap for each user = 1000,
+    /// users can only hold up to 1000 tokens.
+    pub bal_cap: Uint128,
 }
 
 impl Instantiate {

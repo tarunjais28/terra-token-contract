@@ -10,7 +10,7 @@ use cosmwasm_std::{
     Uint128,
 };
 use cw2::set_contract_version;
-use cw20::{BalanceResponse, Cw20Coin};
+use cw20::BalanceResponse;
 use cw20_base::{
     allowances::{
         execute_burn_from, execute_decrease_allowance, execute_increase_allowance,
@@ -35,10 +35,21 @@ pub fn instantiate(
     msg: Instantiate,
 ) -> Result<Response, ContractError> {
     set_contract_version(deps.storage, CONTRACT_NAME, CONTRACT_VERSION)?;
+
     // check valid token info
     msg.validate()?;
+
+    // ensuring balance capital is not exceeded for an user
+    if msg
+        .initial_balances
+        .iter()
+        .any(|init_bal| init_bal.amount > msg.bal_cap)
+    {
+        return Err(ContractError::CannotExceedCap {});
+    }
+
     // create initial accounts
-    let total_supply = create_accounts(&mut deps, &msg.initial_balances, &msg.frozen_balances)?;
+    let total_supply = create_accounts(&mut deps, &msg)?;
 
     if let Some(limit) = msg.get_cap() {
         if total_supply > limit {
@@ -67,22 +78,21 @@ pub fn instantiate(
     Ok(Response::new().add_attribute("action", "intantiated"))
 }
 
-fn create_accounts(
-    deps: &mut DepsMut,
-    accounts: &[Cw20Coin],
-    frozen_accounts: &[Cw20Coin],
-) -> StdResult<Uint128> {
+fn create_accounts(deps: &mut DepsMut, msg: &Instantiate) -> StdResult<Uint128> {
     let mut total_supply = Uint128::zero();
-    for account in accounts {
+    for account in &msg.initial_balances {
         let address = deps.api.addr_validate(&account.address)?;
         BALANCES.save(deps.storage, &address, &account.amount)?;
         total_supply += account.amount;
     }
 
-    for account in frozen_accounts {
+    for account in &msg.frozen_balances {
         let address = deps.api.addr_validate(&account.address)?;
         FROZEN_BALANCES.save(deps.storage, &address, &account.amount)?;
     }
+
+    BALANCE_CAP.save(deps.storage, &msg.bal_cap)?;
+
     Ok(total_supply)
 }
 
@@ -94,9 +104,7 @@ pub fn execute(
     msg: Execute,
 ) -> Result<Response, ContractError> {
     match msg {
-        Execute::Mint { recipient, amount } => {
-            Ok(execute_mint(deps, env, info, recipient, amount)?)
-        }
+        Execute::Mint { recipient, amount } => mint(deps, env, info, recipient, amount),
         Execute::Transfer { recipient, amount } => transfer(deps, env, info, recipient, amount),
         Execute::Send {
             contract,
@@ -147,6 +155,24 @@ pub fn execute(
     }
 }
 
+pub fn mint(
+    deps: DepsMut,
+    env: Env,
+    info: MessageInfo,
+    recipient: String,
+    amount: Uint128,
+) -> Result<Response, ContractError> {
+    // ensuring balance capital is not exceeded for an user
+    let rcpt_addr = deps.api.addr_validate(&recipient)?;
+    let token_bal = BALANCES.load(deps.storage, &rcpt_addr)?;
+    let bal_cap = BALANCE_CAP.load(deps.storage)?;
+    if (token_bal + amount) > bal_cap {
+        return Err(ContractError::CannotExceedCap {});
+    }
+
+    Ok(execute_mint(deps, env, info, recipient, amount)?)
+}
+
 fn transfer(
     deps: DepsMut,
     env: Env,
@@ -161,6 +187,16 @@ fn transfer(
         .unwrap_or(Uint128::zero());
     if (balance - frozen_balance) < amount {
         return Err(ContractError::BalanceFrozen {});
+    }
+
+    // ensuring balance capital is not exceeded for an user
+    let rcpt_addr = deps.api.addr_validate(&recipient)?;
+    let token_bal = BALANCES
+        .load(deps.storage, &rcpt_addr)
+        .unwrap_or(Uint128::default());
+    let bal_cap = BALANCE_CAP.load(deps.storage)?;
+    if (token_bal + amount) > bal_cap {
+        return Err(ContractError::CannotExceedCap {});
     }
 
     Ok(execute_transfer(deps, env, info, recipient, amount)?)
@@ -219,6 +255,16 @@ fn transfer_from(
         .unwrap_or(Uint128::zero());
     if (balance - frozen_balance) < amount {
         return Err(ContractError::BalanceFrozen {});
+    }
+
+    // ensuring balance capital is not exceeded for an user
+    let rcpt_addr = deps.api.addr_validate(&recipient)?;
+    let token_bal = BALANCES
+        .load(deps.storage, &rcpt_addr)
+        .unwrap_or(Uint128::default());
+    let bal_cap = BALANCE_CAP.load(deps.storage)?;
+    if (token_bal + amount) > bal_cap {
+        return Err(ContractError::CannotExceedCap {});
     }
 
     Ok(execute_transfer_from(

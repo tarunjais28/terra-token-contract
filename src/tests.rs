@@ -7,7 +7,7 @@ use cosmwasm_std::{
     testing::{mock_dependencies, mock_env, mock_info},
     Binary, Coin, CosmosMsg, Deps, DepsMut, SubMsg, Uint128, WasmMsg,
 };
-use cw20::{Cw20Coin, Cw20ReceiveMsg, TokenInfoResponse};
+use cw20::{Cw20Coin, Cw20ReceiveMsg, MinterResponse, TokenInfoResponse};
 use cw20_base::contract::{query_balance, query_token_info};
 
 fn get_balance<T: Into<String>>(deps: Deps, address: T) -> Uint128 {
@@ -18,7 +18,7 @@ fn get_frozen_balance<T: Into<String>>(deps: Deps, address: T) -> Uint128 {
     query_frozen_balance(deps, address.into()).unwrap().balance
 }
 
-// this will set up the instantiation for other tests
+// this will set up the instantiation
 fn do_instantiate(
     deps: DepsMut,
     addr1: String,
@@ -26,6 +26,7 @@ fn do_instantiate(
     addr2: String,
     amount2: Uint128,
     frozen_amount: Uint128,
+    bal_cap: Uint128,
 ) {
     let instantiate_msg = Instantiate {
         name: "Bash Shell".to_string(),
@@ -46,6 +47,45 @@ fn do_instantiate(
             address: addr1,
             amount: frozen_amount,
         }],
+        bal_cap,
+    };
+    let info = mock_info("creator", &[]);
+    let env = mock_env();
+    let _ = instantiate(deps, env, info, instantiate_msg).unwrap();
+}
+
+// this will set up the instantiation
+fn do_instantiate_with_minter(
+    deps: DepsMut,
+    addr1: String,
+    amount1: Uint128,
+    addr2: String,
+    amount2: Uint128,
+    frozen_amount: Uint128,
+    bal_cap: Uint128,
+    minter: String,
+    cap: Option<Uint128>,
+) {
+    let instantiate_msg = Instantiate {
+        name: "Bash Shell".to_string(),
+        symbol: "BASH".to_string(),
+        decimals: 6,
+        initial_balances: vec![
+            Cw20Coin {
+                address: addr1.clone(),
+                amount: amount1,
+            },
+            Cw20Coin {
+                address: addr2,
+                amount: amount2,
+            },
+        ],
+        mint: Some(MinterResponse { minter, cap }),
+        frozen_balances: vec![Cw20Coin {
+            address: addr1,
+            amount: frozen_amount,
+        }],
+        bal_cap,
     };
     let info = mock_info("creator", &[]);
     let env = mock_env();
@@ -69,6 +109,7 @@ fn test_basic() {
         }],
         mint: None,
         frozen_balances: vec![],
+        bal_cap: Uint128::from(5000000000000u128),
     };
     let info = mock_info("creator", &[]);
     let env = mock_env();
@@ -91,30 +132,89 @@ fn test_basic() {
 }
 
 #[test]
-fn test_transfer() {
+fn test_mint() {
     let mut deps = mock_dependencies(&[Coin {
         amount: Uint128::default(),
         denom: String::default(),
     }]);
-    let amount1 = Uint128::from(11223344u128);
-    let frozen_amount = Uint128::from(10000000u128);
+    let amount1 = Uint128::from(500u128);
+    let frozen_amount = Uint128::from(400u128);
     let addr1 = String::from("addr0001");
-    let amount2 = Uint128::from(7890987u128);
-    let trans_amount = Uint128::from(500u128);
+    let amount2 = Uint128::from(250u128);
     let addr2 = String::from("addr0002");
-    let addr3 = String::from("addr0003");
+    let bal_cap = Uint128::from(1000u128);
+    let mint_amount = Uint128::from(600u128);
+    let minter = String::from("addr0003");
+    let cap = Some(Uint128::from(2000u128));
 
-    do_instantiate(
+    do_instantiate_with_minter(
         deps.as_mut(),
         addr1.clone(),
         amount1,
         addr2.clone(),
         amount2,
         frozen_amount,
+        bal_cap,
+        minter.clone(),
+        cap,
+    );
+
+    // cannot mint token as balance cap exceeded
+    let info = mock_info(minter.as_ref(), &[]);
+    let env = mock_env();
+    let msg = Execute::Mint {
+        amount: mint_amount,
+        recipient: addr1,
+    };
+    let err = execute(deps.as_mut(), env, info, msg).unwrap_err();
+    assert_eq!(err, ContractError::CannotExceedCap {});
+
+    // valid mint
+    let info = mock_info(minter.as_ref(), &[]);
+    let env = mock_env();
+    let msg = Execute::Mint {
+        amount: mint_amount,
+        recipient: addr2.clone(),
+    };
+    let _ = execute(deps.as_mut(), env, info, msg).unwrap();
+    assert_eq!(get_balance(deps.as_ref(), addr2), amount2 + mint_amount);
+}
+
+#[test]
+fn test_transfer() {
+    let mut deps = mock_dependencies(&[Coin {
+        amount: Uint128::default(),
+        denom: String::default(),
+    }]);
+    let amount1 = Uint128::from(2000u128);
+    let frozen_amount = Uint128::from(1000u128);
+    let addr1 = String::from("addr0001");
+    let amount2 = Uint128::from(2600u128);
+    let trans_amount = Uint128::from(500u128);
+    let addr2 = String::from("addr0002");
+    let addr3 = String::from("addr0003");
+    let bal_cap = Uint128::from(3000u128);
+    let minter = String::from("addr0004");
+    let cap = Some(Uint128::from(10_000u128));
+
+    do_instantiate_with_minter(
+        deps.as_mut(),
+        addr1.clone(),
+        amount1,
+        addr2.clone(),
+        amount2,
+        frozen_amount,
+        bal_cap,
+        minter.clone(),
+        cap,
     );
 
     // Balance before transfer
     assert_eq!(get_balance(deps.as_ref(), addr1.clone()), amount1);
+    assert_eq!(
+        get_frozen_balance(deps.as_ref(), addr1.clone()),
+        frozen_amount
+    );
     assert_eq!(get_balance(deps.as_ref(), addr2.clone()), amount2);
     assert_eq!(get_balance(deps.as_ref(), addr3.clone()), Uint128::zero());
 
@@ -135,6 +235,7 @@ fn test_transfer() {
         recipient: addr3.clone(),
         amount: trans_amount,
     };
+
     let res = execute(deps.as_mut(), env, info, msg).unwrap();
     assert_eq!(res.messages.len(), 0);
     assert_eq!(
@@ -143,20 +244,15 @@ fn test_transfer() {
     );
     assert_eq!(get_balance(deps.as_ref(), addr3.clone()), trans_amount);
 
-    // can transfer entire amount from addr2 as frozen list is empty for addr2
+    // cannot transfer as balance capital will overflow
     let info = mock_info(addr2.as_ref(), &[]);
     let env = mock_env();
     let msg = Execute::Transfer {
         recipient: addr3.clone(),
         amount: amount2,
     };
-    let res = execute(deps.as_mut(), env, info, msg).unwrap();
-    assert_eq!(res.messages.len(), 0);
-    assert_eq!(get_balance(deps.as_ref(), addr2.clone()), Uint128::zero());
-    assert_eq!(
-        get_balance(deps.as_ref(), addr3.clone()),
-        trans_amount + amount2
-    );
+    let err = execute(deps.as_mut(), env, info, msg).unwrap_err();
+    assert_eq!(err, ContractError::CannotExceedCap {});
 }
 
 #[test]
@@ -165,14 +261,15 @@ fn test_send() {
         amount: Uint128::default(),
         denom: String::default(),
     }]);
-    let amount1 = Uint128::from(11223344u128);
-    let frozen_amount = Uint128::from(10000000u128);
+    let amount1 = Uint128::from(2000u128);
+    let frozen_amount = Uint128::from(1000u128);
     let addr1 = String::from("addr0001");
-    let amount2 = Uint128::from(7890987u128);
+    let amount2 = Uint128::from(2600u128);
+    let trans_amount = Uint128::from(500u128);
     let addr2 = String::from("addr0002");
     let contract = String::from("addr0003");
     let send_msg = Binary::from(r#"{"some":123}"#.as_bytes());
-    let trans_amount = Uint128::from(500u128);
+    let bal_cap = Uint128::from(3000u128);
 
     do_instantiate(
         deps.as_mut(),
@@ -181,6 +278,7 @@ fn test_send() {
         addr2.clone(),
         amount2,
         frozen_amount,
+        bal_cap,
     );
 
     // Balance before send
@@ -240,11 +338,12 @@ fn test_burn() {
         amount: Uint128::default(),
         denom: String::default(),
     }]);
-    let amount1 = Uint128::from(11223344u128);
-    let frozen_amount = Uint128::from(10000000u128);
+    let amount1 = Uint128::from(2000u128);
+    let frozen_amount = Uint128::from(1000u128);
     let addr1 = String::from("addr0001");
-    let amount2 = Uint128::from(7890987u128);
+    let amount2 = Uint128::from(2600u128);
     let addr2 = String::from("addr0002");
+    let bal_cap = Uint128::from(3000u128);
 
     do_instantiate(
         deps.as_mut(),
@@ -253,6 +352,7 @@ fn test_burn() {
         addr2.clone(),
         amount2,
         frozen_amount,
+        bal_cap,
     );
 
     // cannot burn token as some balance is frozen
@@ -276,11 +376,12 @@ fn test_update_frozen_list() {
         amount: Uint128::default(),
         denom: String::default(),
     }]);
-    let amount1 = Uint128::from(11223344u128);
-    let frozen_amount = Uint128::from(10000000u128);
+    let amount1 = Uint128::from(2000u128);
+    let frozen_amount = Uint128::from(1000u128);
     let addr1 = String::from("addr0001");
-    let amount2 = Uint128::from(7890987u128);
+    let amount2 = Uint128::from(2600u128);
     let addr2 = String::from("addr0002");
+    let bal_cap = Uint128::from(3000u128);
 
     do_instantiate(
         deps.as_mut(),
@@ -289,6 +390,7 @@ fn test_update_frozen_list() {
         addr2.clone(),
         amount2,
         frozen_amount,
+        bal_cap,
     );
 
     // checking initial frozen balance
