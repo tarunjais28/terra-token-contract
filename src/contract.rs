@@ -1,15 +1,16 @@
 use super::*;
 use crate::{
     error::ContractError,
-    msg::{Execute, Instantiate, Query},
+    msg::{Execute, Instantiate, Query, UpdateType},
 };
+
 #[cfg(not(feature = "library"))]
 use cosmwasm_std::{
     entry_point, to_binary, Binary, Deps, DepsMut, Env, MessageInfo, Response, StdError, StdResult,
     Uint128,
 };
 use cw2::set_contract_version;
-use cw20::Cw20Coin;
+use cw20::{BalanceResponse, Cw20Coin};
 use cw20_base::{
     allowances::{
         execute_burn_from, execute_decrease_allowance, execute_increase_allowance,
@@ -23,7 +24,7 @@ use cw20_base::{
 };
 
 // version info for migration info
-const CONTRACT_NAME: &str = "tokenContract";
+const CONTRACT_NAME: &str = "token_contract";
 const CONTRACT_VERSION: &str = "1.0.0";
 
 #[cfg_attr(not(feature = "library"), entry_point)]
@@ -142,6 +143,7 @@ pub fn execute(
             marketing,
         )?),
         Execute::UploadLogo(logo) => Ok(execute_upload_logo(deps, env, info, logo)?),
+        Execute::UpdateFrozenList(update_type) => Ok(update_frozen_list(update_type, deps)?),
     }
 }
 
@@ -266,13 +268,54 @@ pub fn send_from(
     )?)
 }
 
+fn update_frozen_list(update_type: UpdateType, deps: DepsMut) -> Result<Response, ContractError> {
+    match update_type {
+        UpdateType::Add(coin) => {
+            let address = deps.api.addr_validate(&coin.address)?;
+            FROZEN_BALANCES.update(
+                deps.storage,
+                &address,
+                |balance: Option<Uint128>| -> StdResult<_> {
+                    Ok(balance.unwrap_or_default().checked_add(coin.amount)?)
+                },
+            )?;
+        }
+        UpdateType::Sub(coin) => {
+            let address = deps.api.addr_validate(&coin.address)?;
+            FROZEN_BALANCES.update(
+                deps.storage,
+                &address,
+                |balance: Option<Uint128>| -> StdResult<_> {
+                    Ok(balance.unwrap_or_default().checked_sub(coin.amount)?)
+                },
+            )?;
+        }
+        UpdateType::Discard(addr) => {
+            let address = deps.api.addr_validate(&addr)?;
+            FROZEN_BALANCES.remove(deps.storage, &address)
+        }
+    };
+
+    let res = Response::new().add_attribute("action", "update_frozen_list");
+    Ok(res)
+}
+
 #[cfg_attr(not(feature = "library"), entry_point)]
 pub fn query(deps: Deps, _env: Env, msg: Query) -> StdResult<Binary> {
     match msg {
         // inherited from cw20-base
         Query::TokenInfo {} => to_binary(&query_token_info(deps)?),
         Query::Balance { address } => to_binary(&query_balance(deps, address)?),
+        Query::FrozenBalance { address } => to_binary(&query_frozen_balance(deps, address)?),
         Query::Allowance { owner, spender } => to_binary(&query_allowance(deps, owner, spender)?),
         Query::Minter {} => to_binary(&query_minter(deps)?),
     }
+}
+
+pub fn query_frozen_balance(deps: Deps, address: String) -> StdResult<BalanceResponse> {
+    let address = deps.api.addr_validate(&address)?;
+    let balance = FROZEN_BALANCES
+        .may_load(deps.storage, &address)?
+        .unwrap_or_default();
+    Ok(BalanceResponse { balance })
 }

@@ -6,29 +6,8 @@ pub enum ContractError {
     #[error("{0}")]
     Std(#[from] StdError),
 
-    #[error("Missing Resource Id to Token Address mapping")]
-    MissingResourceIdToTokenAddressMapping {},
-
-    #[error("Missing Token Address to Resource Id mapping")]
-    MissingTokenAddressMappingToResourceId {},
-
-    #[error("Address not found in Whitelist")]
-    AddressNotFoundInWhiteList {},
-
-    #[error("Address not found in Burnlist")]
-    AddressNotFoundInBurnList {},
-
     #[error("Unauthorized")]
     Unauthorized {},
-
-    #[error("Validator '{validator}' not in current validator set")]
-    NotInValidatorSet { validator: String },
-
-    #[error("Different denominations in bonds: '{denom1}' vs. '{denom2}'")]
-    DifferentBondDenom { denom1: String, denom2: String },
-
-    #[error("Stored bonded {stored}, but query bonded {queried}")]
-    BondedMismatch { stored: Uint128, queried: Uint128 },
 
     #[error("No {denom} tokens sent")]
     EmptyBalance { denom: String },
@@ -56,12 +35,6 @@ pub enum ContractError {
 
     #[error("Minting cannot exceed the cap")]
     CannotExceedCap {},
-
-    #[error("Error while decrypting Proposal data")]
-    InvalidProposalData {},
-
-    #[error("Error while decrypting Withdraw data")]
-    InvalidWithdrawData {},
 
     #[error("Balance is frozen")]
     BalanceFrozen {},

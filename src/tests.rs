@@ -1,5 +1,5 @@
 use crate::{
-    contract::{execute, instantiate},
+    contract::{execute, instantiate, query_frozen_balance},
     error::*,
     msg::*,
 };
@@ -12,6 +12,10 @@ use cw20_base::contract::{query_balance, query_token_info};
 
 fn get_balance<T: Into<String>>(deps: Deps, address: T) -> Uint128 {
     query_balance(deps, address.into()).unwrap().balance
+}
+
+fn get_frozen_balance<T: Into<String>>(deps: Deps, address: T) -> Uint128 {
+    query_frozen_balance(deps, address.into()).unwrap().balance
 }
 
 // this will set up the instantiation for other tests
@@ -264,4 +268,71 @@ fn test_burn() {
     let msg = Execute::Burn { amount: amount2 };
     let res = execute(deps.as_mut(), env, info, msg).unwrap();
     assert_eq!(res.messages.len(), 0);
+}
+
+#[test]
+fn test_update_frozen_list() {
+    let mut deps = mock_dependencies(&[Coin {
+        amount: Uint128::default(),
+        denom: String::default(),
+    }]);
+    let amount1 = Uint128::from(11223344u128);
+    let frozen_amount = Uint128::from(10000000u128);
+    let addr1 = String::from("addr0001");
+    let amount2 = Uint128::from(7890987u128);
+    let addr2 = String::from("addr0002");
+
+    do_instantiate(
+        deps.as_mut(),
+        addr1.clone(),
+        amount1,
+        addr2.clone(),
+        amount2,
+        frozen_amount,
+    );
+
+    // checking initial frozen balance
+    assert_eq!(
+        get_frozen_balance(deps.as_ref(), addr1.clone()),
+        frozen_amount
+    );
+
+    // adding frozen balance
+    let info = mock_info(addr2.as_ref(), &[]);
+    let env = mock_env();
+    let msg = Execute::UpdateFrozenList(UpdateType::Add(Cw20Coin {
+        address: addr1.clone(),
+        amount: frozen_amount,
+    }));
+    let _ = execute(deps.as_mut(), env, info, msg).unwrap();
+
+    // frozen balance after addition
+    assert_eq!(
+        get_frozen_balance(deps.as_ref(), addr1.clone()),
+        frozen_amount + frozen_amount
+    );
+
+    // subtract frozen balance
+    let info = mock_info(addr2.as_ref(), &[]);
+    let env = mock_env();
+    let msg = Execute::UpdateFrozenList(UpdateType::Sub(Cw20Coin {
+        address: addr1.clone(),
+        amount: frozen_amount,
+    }));
+    let _ = execute(deps.as_mut(), env, info, msg).unwrap();
+
+    // frozen balance after subtraction
+    assert_eq!(
+        get_frozen_balance(deps.as_ref(), addr1.clone()),
+        frozen_amount
+    );
+
+    // discard frozen balance
+    let info = mock_info(addr2.as_ref(), &[]);
+    let env = mock_env();
+    let msg = Execute::UpdateFrozenList(UpdateType::Discard(addr1.clone()));
+    let _ = execute(deps.as_mut(), env, info, msg).unwrap();
+
+    // frozen balance after subtraction
+    assert_eq!(get_frozen_balance(deps.as_ref(), addr1), Uint128::zero());
 }

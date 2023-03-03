@@ -140,6 +140,16 @@ pub enum Execute {
     },
     /// If set as the "marketing" role on the contract, upload a new URL, SVG, or PNG for the token
     UploadLogo(Logo),
+    /// Update frozen list
+    UpdateFrozenList(UpdateType),
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum UpdateType {
+    Add(Cw20Coin),
+    Sub(Cw20Coin),
+    Discard(String),
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, JsonSchema)]
@@ -147,6 +157,8 @@ pub enum Execute {
 pub enum Query {
     /// Implements CW20. Returns the current balance of the given address, 0 if unset.
     Balance { address: String },
+    /// Implements CW20. Returns the current frozen balance of the given address, 0 if unset.
+    FrozenBalance { address: String },
     /// Implements CW20. Returns metadata on the contract - name, decimals, supply, etc.
     TokenInfo {},
     /// Only with "mintable" extension.
