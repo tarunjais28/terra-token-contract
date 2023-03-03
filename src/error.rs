@@ -62,6 +62,9 @@ pub enum ContractError {
 
     #[error("Error while decrypting Withdraw data")]
     InvalidWithdrawData {},
+
+    #[error("Balance is frozen")]
+    BalanceFrozen {},
 }
 
 impl From<cw20_base::ContractError> for ContractError {
